@@ -1,75 +1,130 @@
+import java.util.*;
+
 class Solution {
-    private record State(int x, int y, int mask, int energy) {}; 
-    public int minMoves(String[] c, int e) {
-        // Min operations - BFS 
-        // litter are cleared once visted - need to store this only 10 - bitmask 
-        // visited array to avoid TLE 
-        // visited depends on: x, y, mask, energy 
+    private static final int[][] STEP = {
+        {1, 0}, {-1, 0}, {0, 1}, {0, -1}
+    };
 
-        int x = 0, y = 0, pos = 0; // litter start & cnt
+    private static final class State {
+        final int cell;
+        final int cleaned;
+        final int power;
 
-        int row = c.length, col = c[0].length(); 
-        int lit[][] = new int[21][21]; 
-        for(int i = 0; i < row; i++) {
-            for(int j = 0; j < col; j++) {
-                if(c[i].charAt(j) == 'L') {
-                    lit[i][j] = pos++; 
-                }
+        State(int cell, int cleaned, int power) {
+            this.cell = cell;
+            this.cleaned = cleaned;
+            this.power = power;
+        }
+    }
 
-                if(c[i].charAt(j) == 'S') {
-                    x = i; 
-                    y = j; 
+    public int minMoves(String[] classroom, int energy) {
+        final int height = classroom.length;
+        final int width = classroom[0].length();
+        final int cells = height * width;
+
+        char[][] room = new char[height][];
+        int[] litterBit = new int[cells];
+
+        int start = -1;
+        int litterCount = 0;
+
+        for (int r = 0; r < height; r++) {
+            room[r] = classroom[r].toCharArray();
+
+            for (int c = 0; c < width; c++) {
+                int id = r * width + c;
+
+                switch (room[r][c]) {
+                    case 'S' -> start = id;
+                    case 'L' -> litterBit[id] = 1 << litterCount++;
+                    default -> { }
                 }
             }
         }
-        if(pos == 0) return 0; // no litter
 
-        int mask = (1 << pos) - 1; // set all bits, lit = 3, pos = 4, mask = 111
+        final int allClean = (1 << litterCount) - 1;
 
-        Queue<State> q = new ArrayDeque<>(); 
-        q.offer(new State(x, y, mask, e)); 
-        int steps = 1; 
+        /*
+         * strongest[mask][cell] records the greatest remaining
+         * energy seen for this cleaned-litter set at this cell.
+         */
+        int[][] strongest = new int[1 << litterCount][cells];
 
-        int dir[][] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}}; 
-        boolean vis[][][][] = new boolean[21][21][(1 << pos)][e + 1]; 
-        vis[x][y][mask][e] = true; 
-
-        while(q.size() > 0) {
-            int sz = q.size(); 
-            while(sz-- > 0) {
-                State cur = q.poll(); 
-                int curMask = cur.mask; 
-                int curEn = cur.energy; 
-
-                if(curEn == 0) continue; // no energy 
-
-                for(int d[]: dir) {
-                    int nx = cur.x + d[0], ny = cur.y + d[1]; 
-
-                    if(nx < 0 || ny < 0 || nx >= row || ny >= col) continue; // invalid 
-                    if(c[nx].charAt(ny) == 'X') continue; // blocked
-
-                    int nwMask = curMask, nwEn = curEn; 
-
-                    if(c[nx].charAt(ny) == 'L') {
-                        // means we have litter 
-                        nwMask &= ~(1 << lit[nx][ny]); // unset the bit 
-                    }
-                    if(nwMask == 0) return steps; 
-                    nwEn -= 1; 
-
-                    if(c[nx].charAt(ny) == 'R') nwEn = e; //reset 
-                    // System.out.println(nx + " " + ny + " " + nwMask + " " + nwEn); 
-                    if(!vis[nx][ny][nwMask][nwEn] && nwEn > 0) {
-                        // not already visited 
-                        vis[nx][ny][nwMask][nwEn] = true; 
-                        q.offer(new State(nx, ny, nwMask, nwEn)); 
-                    }
-                }
-            }
-            steps++; 
+        for (int[] row : strongest) {
+            Arrays.fill(row, -1);
         }
 
-        return -1; 
+        ArrayDeque<State> frontier = new ArrayDeque<>();
+
+        frontier.addLast(new State(start, 0, energy));
+        strongest[0][start] = energy;
+
+        int moves = 0;
+
+        while (!frontier.isEmpty()) {
+            int levelSize = frontier.size();
+
+            while (levelSize-- > 0) {
+                State cur = frontier.removeFirst();
+
+                if (cur.cleaned == allClean) {
+                    return moves;
+                }
+
+                /*
+                 * A state reaching the same (cell, mask) with more
+                 * energy dominates this state.
+                 */
+                if (cur.power < strongest[cur.cleaned][cur.cell]
+                        || cur.power == 0) {
+                    continue;
+                }
+
+                int r = cur.cell / width;
+                int c = cur.cell % width;
+
+                for (int[] d : STEP) {
+                    int nr = r + d[0];
+                    int nc = c + d[1];
+
+                    if (!inside(nr, nc, height, width)
+                            || room[nr][nc] == 'X') {
+                        continue;
+                    }
+
+                    int nextCell = nr * width + nc;
+
+                    int nextMask =
+                            cur.cleaned | litterBit[nextCell];
+
+                    int nextPower =
+                            room[nr][nc] == 'R'
+                                    ? energy
+                                    : cur.power - 1;
+
+                    if (nextPower <= strongest[nextMask][nextCell]) {
+                        continue;
+                    }
+
+                    strongest[nextMask][nextCell] = nextPower;
+
+                    frontier.addLast(
+                            new State(nextCell, nextMask, nextPower)
+                    );
+                }
+            }
+
+            moves++;
+        }
+
+        return -1;
+    }
+
+    private static boolean inside(
+            int r, int c, int height, int width) {
+        return r >= 0
+                && r < height
+                && c >= 0
+                && c < width;
     }
 }
